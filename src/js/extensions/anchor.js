@@ -217,6 +217,10 @@
                 opts.buttonClass = this.customClassOption;
             }
 
+            // Always open link in new window ? Improve later when
+            // embedding same site links in Oliv todo.
+            opts.target = '_blank';
+
             return opts;
         },
 

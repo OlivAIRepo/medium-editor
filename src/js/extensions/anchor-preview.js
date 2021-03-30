@@ -26,6 +26,17 @@
         */
         showOnEmptyLinks: true,
 
+        copyButtonClass: '',
+
+        copyButtonText: 'Copy',
+
+        // Don't need copy button by default.
+        showCopyButton: false,
+
+        editButtonClass: '',
+
+        editButtonText: 'Edit',
+
         init: function () {
             this.anchorPreview = this.createPreview();
 
@@ -44,21 +55,40 @@
         },
 
         createPreview: function () {
-            var el = this.document.createElement('div');
+            var container = this.document.createElement('div');
 
-            el.id = 'medium-editor-anchor-preview-' + this.getEditorId();
-            el.className = 'medium-editor-anchor-preview';
-            el.innerHTML = this.getTemplate();
+            container.id = 'medium-editor-anchor-preview-' + this.getEditorId();
+            container.className = 'medium-editor-anchor-preview';
 
-            this.on(el, 'click', this.handleClick.bind(this));
+            var previewDiv = this.document.createElement('div');
+            previewDiv.className = 'medium-editor-toolbar-anchor-preview';
+            previewDiv.id = 'medium-editor-toolbar-anchor-preview';
 
-            return el;
-        },
+            var anchorEl = this.document.createElement('a');
+            anchorEl.className = 'medium-editor-toolbar-anchor-preview-inner';
+            // Don't do it when link is internal? Oliv todo
+            anchorEl.target = '_blank';
 
-        getTemplate: function () {
-            return '<div class="medium-editor-toolbar-anchor-preview" id="medium-editor-toolbar-anchor-preview">' +
-                '    <a class="medium-editor-toolbar-anchor-preview-inner"></a>' +
-                '</div>';
+            var copyButton = this.document.createElement('button');
+            copyButton.className = 'medium-editor-toolbar-anchor-preview-copy-button ' +
+                this.copyButtonClass;
+            copyButton.textContent = this.copyButtonText;
+            this.on(copyButton, 'click', this.handleCopy.bind(this));
+
+            var editButton = this.document.createElement('button');
+            editButton.className = 'medium-editor-toolbar-anchor-preview-edit-button ' +
+                this.editButtonClass;
+            editButton.textContent = this.editButtonText;
+            this.on(editButton, 'click', this.handleClick.bind(this));
+
+            previewDiv.append(anchorEl);
+            if (this.showCopyButton) {
+                previewDiv.append(copyButton);
+            }
+            previewDiv.append(editButton);
+            container.appendChild(previewDiv);
+
+            return container;
         },
 
         destroy: function () {
@@ -170,6 +200,15 @@
             // when showWhenToolbarIsVisible is true
             if (!this.showWhenToolbarIsVisible) {
                 this.hidePreview();
+            }
+        },
+
+        handleCopy: function () {
+            var anchorExtension = this.base.getExtensionByName('anchor'),
+                activeAnchor = this.activeAnchor;
+
+            if (anchorExtension && activeAnchor) {
+                navigator.clipboard.writeText(activeAnchor.attributes.href.value);
             }
         },
 
