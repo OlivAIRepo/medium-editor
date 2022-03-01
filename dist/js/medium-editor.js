@@ -6730,7 +6730,7 @@ MediumEditor.extensions = {};
     }
 
     function handleBlockDeleteKeydowns(event) {
-        var p, node = MediumEditor.selection.getSelectionStart(this.options.ownerDocument),
+        var br, node = MediumEditor.selection.getSelectionStart(this.options.ownerDocument),
             tagName = node.nodeName.toLowerCase(),
             isEmpty = /^(\s+|<br\/?>)?$/i,
             isHeader = /h\d/i;
@@ -6751,9 +6751,8 @@ MediumEditor.extensions = {};
             } else if (!this.options.disableDoubleReturn && MediumEditor.util.isKey(event, MediumEditor.util.keyCode.ENTER)) {
                 // hitting return in the begining of a header will create empty header elements before the current one
                 // instead, make "<p><br></p>" element, which are what happens if you hit return in an empty paragraph
-                p = this.options.ownerDocument.createElement('p');
-                p.innerHTML = '<br>';
-                node.previousElementSibling.parentNode.insertBefore(p, node);
+                br = this.options.ownerDocument.createElement('br');
+                node.previousElementSibling.parentNode.insertBefore(br, node);
                 event.preventDefault();
             }
         } else if (MediumEditor.util.isKey(event, MediumEditor.util.keyCode.DELETE) &&
@@ -6797,12 +6796,11 @@ MediumEditor.extensions = {};
             // 3) move the cursor into the paragraph
 
             // create a paragraph before the list
-            p = this.options.ownerDocument.createElement('p');
-            p.innerHTML = '<br>';
-            node.parentElement.parentElement.insertBefore(p, node.parentElement);
+            br = this.options.ownerDocument.createElement('br');
+            node.parentElement.parentElement.insertBefore(br, node.parentElement);
 
             // move the cursor into the new paragraph
-            MediumEditor.selection.moveCursor(this.options.ownerDocument, p);
+            MediumEditor.selection.moveCursor(this.options.ownerDocument, br);
 
             // remove the list element
             node.parentElement.removeChild(node);
@@ -6822,12 +6820,11 @@ MediumEditor.extensions = {};
 
             // when cursor is at the end of <blockquote>,
             // then pressing enter key should create <p> tag, not <blockquote>
-            p = this.options.ownerDocument.createElement('p');
-            p.innerHTML = '<br>';
-            node.parentElement.insertBefore(p, node.nextSibling);
+            br = this.options.ownerDocument.createElement('br');
+            node.parentElement.insertBefore(br, node.nextSibling);
 
             // move the cursor into the new paragraph
-            MediumEditor.selection.moveCursor(this.options.ownerDocument, p);
+            MediumEditor.selection.moveCursor(this.options.ownerDocument, br);
 
             event.preventDefault();
         } else if (MediumEditor.util.isKey(event, MediumEditor.util.keyCode.BACKSPACE) &&
