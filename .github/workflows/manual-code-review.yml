@@ -1,0 +1,146 @@
+name: Manual Code Review
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to review
+        required: true
+        type: string
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    if: |
+      (github.event_name == 'issue_comment'
+       && github.event.issue.pull_request != null
+       && github.event.comment.user.type != 'Bot'
+       && !contains(github.event.comment.user.login, '[bot]')
+       && github.event.comment.body == '/review')
+      || github.event_name == 'workflow_dispatch'
+    runs-on: codebuild-claude-review-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - name: Ensure gh is present
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            GH_VER=2.62.0
+            curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_arm64.tar.gz" -o /tmp/gh.tgz
+            tar -xzf /tmp/gh.tgz -C /tmp
+            install -m 755 "/tmp/gh_${GH_VER}_linux_arm64/bin/gh" /usr/local/bin/gh
+          fi
+          gh --version | head -1
+
+      - name: Request review
+        id: request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEW_TOKEN: ${{ secrets.REVIEW_TRIGGER_TOKEN || secrets.AUTO_APPROVE_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          ACTOR: ${{ github.triggering_actor }}
+          INPUT_PR: ${{ github.event.inputs.pr }}
+        run: |
+          set -euo pipefail
+
+          deny() { echo "::error::$1"; exit 1; }
+
+          number=""
+          requester=""
+
+          case "${EVENT_NAME:-}" in
+            issue_comment)
+              is_pr=$(jq -r 'if .issue.pull_request then "yes" else "no" end' "$EVENT_PATH")
+              [ "$is_pr" = "yes" ] || deny "the comment is on an issue, not a pull request"
+
+              body=$(jq -r '.comment.body // ""' "$EVENT_PATH")
+              [ "$body" = "/review" ] || deny "the comment is not exactly /review"
+
+              requester=$(jq -r '.comment.user.login // ""' "$EVENT_PATH")
+              requester_type=$(jq -r '.comment.user.type // ""' "$EVENT_PATH")
+              case "$requester_type" in Bot) deny "review requests from bots are not accepted" ;; esac
+              case "$requester" in *'[bot]') deny "review requests from bots are not accepted" ;; esac
+
+              number=$(jq -r '.issue.number // ""' "$EVENT_PATH")
+              ;;
+            workflow_dispatch)
+              number="${INPUT_PR:-}"
+              requester="${ACTOR:-}"
+              ;;
+            *)
+              deny "unsupported event ${EVENT_NAME:-}"
+              ;;
+          esac
+
+          case "$number" in
+            ''|*[!0-9]*) deny "pull request number '$number' is not numeric" ;;
+            0*) deny "pull request number '$number' is not positive" ;;
+          esac
+
+          [ -n "$requester" ] || deny "no requester could be determined"
+
+          requester_type=$(gh api "users/$requester" --jq '.type' 2>/dev/null || echo "")
+          [ "$requester_type" = "User" ] || deny "requester $requester is not a human user (type: ${requester_type:-unknown})"
+
+          perm=$(gh api "repos/$REPO/collaborators/$requester/permission" --jq '.permission' 2>/dev/null || echo none)
+          case "$perm" in admin|write|maintain) : ;; *) deny "requester $requester lacks write permission (has: $perm)" ;; esac
+
+          pr_json=$(gh api "repos/$REPO/pulls/$number" 2>/dev/null) || deny "could not read pull request $REPO#$number"
+          [ "$(printf '%s' "$pr_json" | jq -r '.state')" = "open" ] || deny "pull request $REPO#$number is not open"
+          [ "$(printf '%s' "$pr_json" | jq -r '.merged')" = "false" ] || deny "pull request $REPO#$number is already merged"
+          [ "$(printf '%s' "$pr_json" | jq -r '.draft')" = "false" ] || deny "pull request $REPO#$number is a draft"
+
+          [ -n "${REVIEW_TOKEN:-}" ] || deny "REVIEW_TRIGGER_TOKEN or AUTO_APPROVE_TOKEN is not configured for $REPO"
+
+          echo "review requested for $REPO#$number by $requester (permission: $perm)"
+
+          attempt=$(mktemp)
+          if ! GH_TOKEN="$REVIEW_TOKEN" gh api --method DELETE \
+              "repos/$REPO/issues/$number/labels/claude-review" >"$attempt" 2>&1; then
+            if ! grep -qE 'HTTP 404|Not Found' "$attempt"; then
+              cat "$attempt"
+              deny "failed to remove the claude-review label from $REPO#$number"
+            fi
+          fi
+
+          add_label() {
+            GH_TOKEN="$REVIEW_TOKEN" gh api --method POST \
+              "repos/$REPO/issues/$number/labels" -f 'labels[]=claude-review' >"$attempt" 2>&1
+          }
+
+          if ! add_label; then
+            if grep -qE 'HTTP 422|HTTP 404|not found|Could not add label' "$attempt"; then
+              if ! GH_TOKEN="$REVIEW_TOKEN" gh label create claude-review --repo "$REPO" \
+                  --color ededed --description "Ask Claude Code Review to review this PR" >"$attempt" 2>&1; then
+                cat "$attempt"
+                deny "failed to create the claude-review label in $REPO"
+              fi
+              add_label || { cat "$attempt"; deny "failed to add the claude-review label to $REPO#$number"; }
+            else
+              cat "$attempt"
+              deny "failed to add the claude-review label to $REPO#$number"
+            fi
+          fi
+
+          echo "claude-review label set on $REPO#$number"
+
+  label-review:
+    if: github.event_name == 'pull_request_target' && github.event.label.name == 'claude-review'
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    uses: OlivAIRepo/.github/.github/workflows/claude-code-review.yml@783f4a7620190ee9650604369307b8bdf776a460
+    secrets: inherit
